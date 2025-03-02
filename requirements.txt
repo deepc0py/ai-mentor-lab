@@ -1,0 +1,9 @@
+chromadb
+langchain
+langchain-openai
+sentence-transformers
+sqlmodel
+python-dotenv
+psycopg2-binary
+pydantic
+typing-extensions
