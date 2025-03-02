@@ -15,6 +15,9 @@ from rag.chroma_setup import ChromaDBManager
 from rag.db_integration import RAGDatabaseIntegration
 from rag.homework_generator import HomeworkGenerator
 
+import sys
+import subprocess
+
 # Load environment variables
 load_dotenv()
 
@@ -130,16 +133,14 @@ def generate_activity_pairings(
 
 def main():
     """Main function to run the ESL RAG application."""
-    parser = argparse.ArgumentParser(description="ESL RAG Application")
-    
-    # Add subparsers for different commands
+    parser = argparse.ArgumentParser(description="ESL Teaching Assistant CLI")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
     
-    # Init command
+    # Initialize database command
     init_parser = subparsers.add_parser("init", help="Initialize ChromaDB")
     init_parser.add_argument("--persist-dir", type=str, default="./chroma_db", help="ChromaDB persistence directory")
     
-    # Sync command
+    # Sync data command
     sync_parser = subparsers.add_parser("sync", help="Sync data from PostgreSQL to ChromaDB")
     sync_parser.add_argument("--persist-dir", type=str, default="./chroma_db", help="ChromaDB persistence directory")
     
@@ -148,42 +149,30 @@ def main():
     homework_parser.add_argument("--student-id", type=int, required=True, help="Student ID")
     homework_parser.add_argument("--template-id", type=int, help="Homework template ID (optional)")
     homework_parser.add_argument("--class-id", type=int, help="Class ID (optional)")
-    homework_parser.add_argument("--no-save", action="store_true", help="Don't save to database")
     homework_parser.add_argument("--persist-dir", type=str, default="./chroma_db", help="ChromaDB persistence directory")
-    homework_parser.add_argument("--output", type=str, help="Output file for JSON results")
-    homework_parser.add_argument("--api-key", type=str, help="OpenAI API key (overrides environment variable)")
+    homework_parser.add_argument("--no-save", action="store_true", help="Don't save to database")
     
-    # Generate pairings command
-    pairings_parser = subparsers.add_parser("pairings", help="Generate student pairings for activities")
+    # Generate activity pairings command
+    pairings_parser = subparsers.add_parser("pairings", help="Generate activity pairings")
     pairings_parser.add_argument("--class-id", type=int, required=True, help="Class ID")
     pairings_parser.add_argument("--template-id", type=int, help="Activity template ID (optional)")
-    pairings_parser.add_argument("--no-save", action="store_true", help="Don't save to database")
     pairings_parser.add_argument("--persist-dir", type=str, default="./chroma_db", help="ChromaDB persistence directory")
-    pairings_parser.add_argument("--output", type=str, help="Output file for JSON results")
-    pairings_parser.add_argument("--api-key", type=str, help="OpenAI API key (overrides environment variable)")
+    pairings_parser.add_argument("--no-save", action="store_true", help="Don't save to database")
     
-    # Parse arguments
+    # Start ChromaDB server command
+    server_parser = subparsers.add_parser("server", help="Start ChromaDB server for UI access")
+    server_parser.add_argument("--host", type=str, default="localhost", help="Host to bind the server to")
+    server_parser.add_argument("--port", type=int, default=8000, help="Port to bind the server to")
+    server_parser.add_argument("--persist-dir", type=str, default="./chroma_db", help="ChromaDB persistence directory")
+    
     args = parser.parse_args()
     
-    # Check for OpenAI API key
-    openai_api_key = args.api_key if hasattr(args, 'api_key') and args.api_key else os.getenv("OPENAI_API_KEY")
-    
-    if not openai_api_key and args.command in ["homework", "pairings"]:
-        print("Error: OPENAI_API_KEY environment variable not set and --api-key not provided")
+    if not args.command:
+        parser.print_help()
         return
-    else:
-        if openai_api_key:
-            print(f"OpenAI API key is set {'from command line' if hasattr(args, 'api_key') and args.api_key else 'from environment'}")
-            os.environ["OPENAI_API_KEY"] = openai_api_key
     
-    # Execute commands
+    # Initialize the database if needed
     if args.command == "init":
-        print(f"Initializing databases...")
-        # Initialize SQL database
-        print("Initializing SQL database...")
-        init_db()
-        print("SQL database initialized successfully")
-        
         # Initialize ChromaDB
         print(f"Initializing ChromaDB in {args.persist_dir}...")
         init_chroma_db(args.persist_dir)
@@ -193,12 +182,13 @@ def main():
         print(f"Syncing data to ChromaDB in {args.persist_dir}...")
         db_integration = RAGDatabaseIntegration(chroma_persist_dir=args.persist_dir)
         results = sync_data_to_chroma(db_integration)
-        print(f"Sync completed: {json.dumps(results, indent=2)}")
+        print(f"Sync complete. Synced {results['homework_templates']} homework templates, "
+              f"{results['activity_templates']} activity templates, and "
+              f"{results['student_profiles']} student profiles.")
     
     elif args.command == "homework":
-        print(f"Generating personalized homework for student {args.student_id}...")
         db_integration = RAGDatabaseIntegration(chroma_persist_dir=args.persist_dir)
-        generator = HomeworkGenerator(openai_api_key=openai_api_key, db_integration=db_integration)
+        generator = HomeworkGenerator(db_integration)
         
         result = generate_homework(
             generator=generator,
@@ -208,15 +198,9 @@ def main():
             save_to_db=not args.no_save
         )
         
-        if args.output:
-            with open(args.output, "w") as f:
-                json.dump(result, f, indent=2)
-                print(f"Results saved to {args.output}")
-        else:
-            print(json.dumps(result, indent=2))
+        print(json.dumps(result, indent=2))
     
     elif args.command == "pairings":
-        print(f"Generating student pairings for class {args.class_id}...")
         db_integration = RAGDatabaseIntegration(chroma_persist_dir=args.persist_dir)
         
         result = generate_activity_pairings(
@@ -226,15 +210,45 @@ def main():
             save_to_db=not args.no_save
         )
         
-        if args.output:
-            with open(args.output, "w") as f:
-                json.dump(result, f, indent=2)
-                print(f"Results saved to {args.output}")
-        else:
-            print(json.dumps(result, indent=2))
+        print(json.dumps(result, indent=2))
     
-    else:
-        parser.print_help()
+    elif args.command == "server":
+        print(f"Starting ChromaDB server at http://{args.host}:{args.port}")
+        print(f"Connect to this server using Chroma UI at https://chroma-ui.vercel.app")
+        print(f"Use the following connection URL: http://{args.host}:{args.port}")
+        print("\nPress Ctrl+C to stop the server")
+        
+        try:
+            # Create directory if it doesn't exist
+            os.makedirs(args.persist_dir, exist_ok=True)
+            
+            # Use the chromadb CLI to start the server
+            cmd = [
+                sys.executable, "-m", "chromadb.server",
+                "--host", args.host,
+                "--port", str(args.port),
+                "--path", args.persist_dir
+            ]
+            
+            # Start the server process
+            subprocess.run(cmd)
+            
+        except KeyboardInterrupt:
+            print("\nServer stopped")
+        except Exception as e:
+            print(f"\nError starting server: {e}")
+            print("\nTrying alternative method...")
+            
+            try:
+                # Try using the ChromaDBManager as a fallback
+                ChromaDBManager.start_chroma_server(
+                    persist_directory=args.persist_dir,
+                    host=args.host,
+                    port=args.port
+                )
+            except Exception as e2:
+                print(f"\nError with alternative method: {e2}")
+                print("\nPlease check your ChromaDB installation and version.")
 
 if __name__ == "__main__":
     main()

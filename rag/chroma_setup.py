@@ -8,18 +8,35 @@ from datetime import datetime
 class ChromaDBManager:
     """Manages ChromaDB operations for the ESL RAG application."""
     
-    def __init__(self, persist_directory: str = "./chroma_db"):
-        """Initialize ChromaDB with persistence."""
+    def __init__(self, persist_directory: str = "./chroma_db", start_server: bool = False, server_host: str = "localhost", server_port: int = 8000):
+        """Initialize ChromaDB with persistence.
+        
+        Args:
+            persist_directory: Directory to store ChromaDB data
+            start_server: Whether to start a ChromaDB server (for UI access)
+            server_host: Host to bind the server to
+            server_port: Port to bind the server to
+        """
         # Create directory if it doesn't exist
         os.makedirs(persist_directory, exist_ok=True)
         
-        # Initialize the ChromaDB client with persistence
-        self.client = chromadb.PersistentClient(
-            path=persist_directory,
-            settings=Settings(
-                anonymized_telemetry=False
+        if start_server:
+            # Initialize the ChromaDB server for UI access
+            self.client = chromadb.HttpClient(
+                host=server_host,
+                port=server_port
             )
-        )
+            print(f"ChromaDB server started at http://{server_host}:{server_port}")
+            print(f"You can connect to this server using Chroma UI at https://chroma-ui.vercel.app")
+            print(f"Use the following connection URL: http://{server_host}:{server_port}")
+        else:
+            # Initialize the ChromaDB client with persistence (local mode)
+            self.client = chromadb.PersistentClient(
+                path=persist_directory,
+                settings=Settings(
+                    anonymized_telemetry=False
+                )
+            )
         
         # Set up embedding function (using sentence-transformers)
         self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
@@ -31,6 +48,40 @@ class ChromaDBManager:
         self.ACTIVITY_COLLECTION = "activity_templates"
         self.STUDENT_PROFILES_COLLECTION = "student_profiles"
     
+    @staticmethod
+    def start_chroma_server(persist_directory: str = "./chroma_db", host: str = "localhost", port: int = 8000):
+        """Start a ChromaDB server for UI access.
+        
+        This is a standalone method that can be called to start a ChromaDB server
+        without initializing the full ChromaDBManager.
+        
+        Args:
+            persist_directory: Directory where ChromaDB data is stored
+            host: Host to bind the server to
+            port: Port to bind the server to
+        """
+        import subprocess
+        import sys
+        
+        # Create directory if it doesn't exist
+        os.makedirs(persist_directory, exist_ok=True)
+        
+        print(f"Starting ChromaDB server at http://{host}:{port}")
+        print(f"You can connect to this server using Chroma UI at https://chroma-ui.vercel.app")
+        print(f"Use the following connection URL: http://{host}:{port}")
+        
+        # Use the chromadb CLI to start the server
+        # This is more reliable than using the Python API directly
+        cmd = [
+            sys.executable, "-m", "chromadb.server",
+            "--host", host,
+            "--port", str(port),
+            "--path", persist_directory
+        ]
+        
+        # Start the server process
+        subprocess.run(cmd)
+        
     def create_collections(self):
         """Create collections if they don't exist."""
         # Create or get collections
